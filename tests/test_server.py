@@ -19,6 +19,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("DOUBAO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DOUBAO_CLIENT_TOKEN", "client-test-token")
     monkeypatch.setenv("DOUBAO_WORKER_TOKENS", '{"a":"worker-a-token","b":"worker-b-token"}')
+    monkeypatch.setenv("DOUBAO_WORKER_ENROLL_TOKEN", "enroll-test-token")
     monkeypatch.setenv("DOUBAO_WORKER_RELEASE_TOKEN", "release-test-token")
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     name = "server_test_" + uuid.uuid4().hex
@@ -132,6 +133,24 @@ def test_auth_and_transition_restrictions(setup):
                            json={"worker_id": "b", "lease_token": owned["lease_token"], "status": "running"},
                            headers=auth("worker-b-token"))
     assert response.status_code == 409
+
+
+def test_worker_registration_creates_independent_token(setup):
+    _, client = setup
+    body = {"worker_id": "wkr-test-001", "machine_name": "cloud-a"}
+    assert client.post("/api/workers/register", json=body).status_code == 401
+    response = client.post("/api/workers/register", json=body,
+                           headers={"X-Worker-Enrollment-Token": "enroll-test-token"})
+    assert response.status_code == 200, response.text
+    credentials = response.json()
+    assert credentials["worker_id"] == body["worker_id"]
+    assert len(credentials["worker_token"]) >= 32
+    heartbeat = client.post("/api/workers/heartbeat", json={
+        "worker_id": body["worker_id"], "manager_ready": True, "accounts": 2,
+    }, headers=auth(credentials["worker_token"]))
+    assert heartbeat.status_code == 200, heartbeat.text
+    assert client.post("/api/workers/register", json=body,
+                       headers={"X-Worker-Enrollment-Token": "enroll-test-token"}).status_code == 409
 
 
 def test_importable_client_reference_to_download(setup, tmp_path):

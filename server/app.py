@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+import re
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -24,6 +25,7 @@ REFERENCES = ROOT / "references"
 REFERENCES.mkdir(exist_ok=True)
 CLIENT_TOKEN = os.environ.get("DOUBAO_CLIENT_TOKEN", "")
 WORKER_TOKENS = json.loads(os.environ.get("DOUBAO_WORKER_TOKENS", "{}"))
+WORKER_ENROLL_TOKEN = os.environ.get("DOUBAO_WORKER_ENROLL_TOKEN", "")
 QINIU_ACCESS_KEY = os.environ.get("QINIU_ACCESS_KEY", "")
 QINIU_SECRET_KEY = os.environ.get("QINIU_SECRET_KEY", "")
 QINIU_BUCKET = os.environ.get("QINIU_BUCKET", "")
@@ -77,6 +79,10 @@ with db() as conn:
           id TEXT PRIMARY KEY, last_seen REAL NOT NULL, manager_ready INTEGER NOT NULL DEFAULT 0,
           accounts INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS worker_credentials (
+          worker_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL,
+          machine_name TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
+        );
     """)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
     if "reference_count" not in columns:
@@ -99,8 +105,47 @@ def client_auth(authorization: str = Header(default="")):
 
 def worker_auth(worker_id: str, authorization: str = Header(default="")):
     expected = WORKER_TOKENS.get(worker_id)
-    if not expected or not hmac.compare_digest(token_value(authorization), expected):
+    supplied = token_value(authorization)
+    if expected and hmac.compare_digest(supplied, expected):
+        return
+    if supplied:
+        conn = sqlite3.connect(DB, timeout=30)
+        try:
+            row = conn.execute("SELECT token_hash FROM worker_credentials WHERE worker_id=?", (worker_id,)).fetchone()
+        finally:
+            conn.close()
+        if row and hmac.compare_digest(hashlib.sha256(supplied.encode("utf-8")).hexdigest(), row[0]):
+            return
         raise HTTPException(401, "Invalid worker token")
+    raise HTTPException(401, "Invalid worker token")
+
+
+def worker_id_valid(value):
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,80}", value or ""))
+
+
+class WorkerRegistration(BaseModel):
+    worker_id: str = Field(min_length=2, max_length=81)
+    machine_name: str = Field(default="", max_length=128)
+
+
+@app.post("/api/workers/register")
+def register_worker(body: WorkerRegistration,
+                    enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
+    if not WORKER_ENROLL_TOKEN or not hmac.compare_digest(enrollment_token, WORKER_ENROLL_TOKEN):
+        raise HTTPException(401, "Invalid worker enrollment token")
+    if not worker_id_valid(body.worker_id):
+        raise HTTPException(422, "Invalid worker id")
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with db() as conn:
+        if body.worker_id in WORKER_TOKENS or conn.execute(
+                "SELECT 1 FROM worker_credentials WHERE worker_id=?", (body.worker_id,)).fetchone():
+            raise HTTPException(409, "Worker id already registered")
+        conn.execute(
+            "INSERT INTO worker_credentials (worker_id,token_hash,machine_name,created_at) VALUES (?,?,?,?)",
+            (body.worker_id, hashlib.sha256(token.encode("utf-8")).hexdigest(), body.machine_name, now))
+    return {"worker_id": body.worker_id, "worker_token": token}
 
 
 def worker_release_info():

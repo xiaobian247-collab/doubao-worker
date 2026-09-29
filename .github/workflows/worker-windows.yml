@@ -38,6 +38,7 @@ jobs:
           if (-not (Test-Path dist/DoubaoWorker.exe)) { throw 'Worker EXE was not built' }
           Copy-Item worker/config.example.json dist/config.example.json
           Copy-Item worker/INSTALL.zh-CN.md dist/INSTALL.zh-CN.md
+          Copy-Item worker/install-worker.ps1 dist/install-worker.ps1
           Copy-Item worker/VERSION dist/VERSION
       - name: Verify version and executable
         shell: pwsh
