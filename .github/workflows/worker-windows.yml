@@ -50,6 +50,11 @@ jobs:
           if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { throw 'Invalid Windows EXE' }
           "WORKER_VERSION=$version" >> $env:GITHUB_ENV
           Get-FileHash dist/DoubaoWorker.exe -Algorithm SHA256
+      - name: Smoke test Windows executable
+        shell: pwsh
+        run: |
+          & .\dist\DoubaoWorker.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'Worker EXE failed to start' }
       - uses: actions/upload-artifact@v4
         with:
           name: DoubaoWorker-windows-x64

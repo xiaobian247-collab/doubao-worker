@@ -9,12 +9,12 @@
 `DoubaoWorker-windows-x64` 构建产物，里面有 exe、配置模板和说明。
 云机只需下载这个产物，无须安装 Python。
 
-发布正式更新时，先修改 `worker/VERSION`，例如从 `0.1.0` 改为 `0.1.1`，
+发布正式更新时，先修改 `worker/VERSION`，例如从 `0.1.1` 改为 `0.1.2`，
 推送代码并创建相同版本的 tag：
 
 ```sh
-git tag worker-v0.1.1
-git push origin main worker-v0.1.1
+git tag worker-v0.1.2
+git push origin main worker-v0.1.2
 ```
 
 Actions 会创建 GitHub Release。服务器每五分钟自动镜像最新公开 Release；
