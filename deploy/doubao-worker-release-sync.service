@@ -1,0 +1,12 @@
+[Unit]
+Description=Mirror latest Doubao Worker GitHub release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/doubao-cloud/server
+EnvironmentFile=/etc/doubao-cloud.env
+ExecStart=/opt/doubao-cloud/.venv/bin/python /opt/doubao-cloud/server/sync_worker_release.py

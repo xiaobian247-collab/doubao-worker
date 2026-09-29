@@ -40,7 +40,7 @@ dist\config.example.json
 把 `config.example.json` 复制为 `dist\config.json` 并填写 token。之后只要把
 `dist` 目录整体保留，运行 `dist\DoubaoWorker.exe` 就不再需要 Python。
 GitHub Actions 构建的 exe 已内置 plugin 和版本号，直接放在 `config.json` 旁即可。
-Worker 启动和空闲时会从服务器检查正式更新；生成任务执行期间不会更新。
+Worker 启动和每五分钟空闲时会从服务器检查正式更新；生成任务执行期间不会更新。
 
 ## 3. 检查连接
 
@@ -72,5 +72,5 @@ py -3.11 -m venv .venv
 服务器配置七牛后，Worker 会领取限时上传凭证并直接上传视频；尚未配置时保持
 原有的上传服务器路径。
 
-说明：本环境没有 Windows 云机，`.exe` 需要你在云机执行脚本后生成，不能在这里
-声称已经完成 Windows 实机验证。
+说明：GitHub Actions 已在 Windows 构建出 exe，但还需要在你的云机上用
+`--check` 验证管理器环境和网络连接。

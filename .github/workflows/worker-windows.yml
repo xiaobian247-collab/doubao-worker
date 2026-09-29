@@ -69,7 +69,10 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.WORKER_RELEASE_TOKEN }}
         run: |
-          if (-not $env:RELEASE_TOKEN) { throw 'Configure WORKER_RELEASE_TOKEN in GitHub repository secrets' }
+          if (-not $env:RELEASE_TOKEN) {
+            Write-Host 'No upload secret; server mirrors this public GitHub Release on its timer.'
+            exit 0
+          }
           curl.exe --fail-with-body --silent --show-error `
             -H "X-Worker-Release-Token: $env:RELEASE_TOKEN" `
             -F "version=$env:WORKER_VERSION" `

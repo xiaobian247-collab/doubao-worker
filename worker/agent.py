@@ -361,7 +361,7 @@ def main_loop(once=False):
                         current[0] = None
                 elif once:
                     return
-                elif time.monotonic() - last_update_check >= 3600:
+                elif time.monotonic() - last_update_check >= 300:
                     last_update_check = time.monotonic()
                     if check_for_update():
                         return

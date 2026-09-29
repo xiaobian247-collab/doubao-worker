@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Doubao Worker GitHub releases every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=doubao-worker-release-sync.service
+
+[Install]
+WantedBy=timers.target

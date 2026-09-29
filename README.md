@@ -1,7 +1,11 @@
 # Doubao Cloud MVP
 
-The server is currently deployed at `https://192.144.235.126`. See
+The server is currently deployed at `https://www.zcbox.top`. See
 `DEPLOYMENT-STATUS.zh-CN.md` for the live deployment status.
+
+Windows EXE builds and automatic updates are documented in
+`WORKER-RELEASE.zh-CN.md`. GitHub Actions builds the EXE, so Windows cloud
+desktops do not need Python.
 
 This package has three parts: `server/app.py` (scheduler and file storage),
 `worker/agent.py` (one Windows worker per cloud desktop), and `client.py` (Mac
@@ -12,7 +16,7 @@ original directory intact; do not copy only the EXE.
 
 ## Requirements
 
-- Python 3.11 on the server, Windows cloud desktops, and Mac client.
+- Python 3.11 on the server and Mac client; the Windows EXE needs no Python.
 - An HTTPS reverse proxy for the server in production. Only port 443 needs to
   be public. Never expose the manager's port 9223.
 - A logged-in Windows desktop session with the manager's Doubao accounts.
@@ -30,45 +34,40 @@ export DOUBAO_WORKER_TOKENS='{"worker-01":"another-long-random-secret"}'
 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-Use one Uvicorn process with SQLite. For multiple API processes or multiple
-server hosts, migrate the transactional scheduler to PostgreSQL. Keep the data
-directory private; it contains prompts and videos. Back it up. This MVP stores
-videos on the server, with a 2 GB per-video limit; object storage can replace
-the artifact endpoints when transfer volume grows.
+Use one Uvicorn process with SQLite. Keep the data directory private and back it
+up. When Qiniu is configured, Workers upload videos there directly; otherwise
+they upload to the server.
 
 ## Windows Worker
 
-Copy the entire `worker` folder to the Windows cloud desktop. Place it beside
-the manager's complete portable directory, or set `DOUBAO_MANAGER_EXE` to the
-actual EXE path. Copy `config.example.json` to `config.json` and edit the URL,
-Worker ID, token, and manager path. Keep `config.json` private. In PowerShell:
+Download `DoubaoWorker-windows-x64` from the latest successful GitHub Actions
+run, or download `DoubaoWorker.exe` from Releases. Copy `config.example.json`
+to `config.json` beside the EXE and fill in `https://www.zcbox.top`, the Worker
+ID and token, and the path to `豆包管理器.exe`. Keep `config.json` private. The
+manager's entire portable directory must stay intact. In PowerShell:
 
 ```powershell
-cd C:\DoubaoCloud\worker
-py -3.11 -m venv .venv
-.\.venv\Scripts\pip.exe install -r requirements.txt
-.\.venv\Scripts\python.exe agent.py
+cd C:\DoubaoWorker
+.\DoubaoWorker.exe --check
+.\DoubaoWorker.exe
 ```
 
-To create `DoubaoWorker.exe` on Windows, run `worker\build-worker.ps1` in
-PowerShell. Deploy `worker\dist\DoubaoWorker.exe` together with its sibling
-`worker\dist\plugin` folder. Set the same environment variables before
-starting the EXE, or copy `config.example.json` to `config.json` beside it.
-Environment variables override the config file. Packaging cannot be verified
-on this Mac.
+The GitHub-built EXE embeds the plugin and checks the API server for updates
+at startup and every five idle minutes. A running generation is never
+interrupted. Environment variables override the config file. The optional
+`worker\build-worker.ps1` script builds the same EXE on a Windows machine.
 
 Run the Worker once per Windows session. Use Task Scheduler's **At log on**
 trigger for unattended startup. The cloud desktop must keep an interactive
 logged-in session; Session 0 services cannot reliably host the Electron UI.
 The Worker has no inbound network listener. `DOUBAO_WORKER_DATA` changes its
-state/output directory. The plugin copy writes some debug output to
-`worker/plugin`, so install this folder in a writable location.
+state/output directory; install the Worker in a writable location.
 
 ## Mac client
 
 ```sh
 python3.11 -m pip install requests
-export DOUBAO_SERVER_URL='https://192.144.235.126'
+export DOUBAO_SERVER_URL='https://www.zcbox.top'
 export DOUBAO_CLIENT_TOKEN='replace-with-a-long-random-secret'
 python3.11 client.py submit '夜晚城市街道，电影感运镜' --duration 10 --ratio 16:9
 python3.11 client.py status JOB_ID
