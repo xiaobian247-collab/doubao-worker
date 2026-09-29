@@ -15,15 +15,23 @@ if (-not $EnrollToken) {
 $ServerUrl = $ServerUrl.TrimEnd('/')
 $defaultManagerUrl = "$ServerUrl/api/worker-assets/manager"
 if (-not $ManagerUrl) { $ManagerUrl = $defaultManagerUrl }
+$workerUrl = "$ServerUrl/api/worker-assets/worker"
 $workerExe = Join-Path $InstallDir "DoubaoWorker.exe"
 $configPath = Join-Path $InstallDir "config.json"
 $managerDir = Join-Path $InstallDir "manager"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 if (-not (Test-Path $workerExe)) {
-    $url = "https://github.com/xiaobian247-collab/doubao-worker/releases/download/worker-v$WorkerVersion/DoubaoWorker.exe"
+    $downloadHeaders = @{ "X-Worker-Enrollment-Token" = $EnrollToken }
+    $manifest = Invoke-RestMethod -Uri "$workerUrl/manifest" -Headers $downloadHeaders
+    if (-not $manifest.sha256) { throw "Worker package manifest has no SHA-256." }
     Write-Host "Downloading Worker $WorkerVersion..."
-    Invoke-WebRequest -Uri $url -OutFile $workerExe -UseBasicParsing
+    Invoke-WebRequest -Uri $workerUrl -Headers $downloadHeaders -OutFile $workerExe -UseBasicParsing
+    $actual = (Get-FileHash $workerExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $manifest.sha256.ToLowerInvariant()) {
+        Remove-Item $workerExe -Force
+        throw "Worker package SHA-256 mismatch."
+    }
 }
 
 function Find-ManagerExe {

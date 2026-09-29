@@ -167,6 +167,16 @@ def test_worker_registration_creates_independent_token(setup):
     assert download.status_code == 200
     assert download.content == package.read_bytes()
 
+    module.WORKER_RELEASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    module.WORKER_RELEASE_FILE.write_bytes(b"MZ" + b"worker" * 10)
+    module.WORKER_RELEASE_MANIFEST.write_text('{"version":"0.1.1"}', encoding="utf-8")
+    worker_manifest = client.get("/api/worker-assets/worker/manifest", headers=headers)
+    assert worker_manifest.status_code == 200
+    assert worker_manifest.json()["sha256"] == hashlib.sha256(module.WORKER_RELEASE_FILE.read_bytes()).hexdigest()
+    worker_download = client.get("/api/worker-assets/worker", headers=headers)
+    assert worker_download.status_code == 200
+    assert worker_download.content == module.WORKER_RELEASE_FILE.read_bytes()
+
 
 def test_importable_client_reference_to_download(setup, tmp_path):
     _, server = setup

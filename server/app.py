@@ -40,6 +40,9 @@ WORKER_RELEASE_ADMIN_TOKEN = os.environ.get("DOUBAO_WORKER_RELEASE_TOKEN", "")
 MANAGER_ASSET_FILE = Path(os.environ.get(
     "DOUBAO_MANAGER_ASSET_FILE", str(ROOT / "worker-assets" / "DoubaoManager.zip")
 )).resolve()
+INSTALL_SCRIPT_FILE = Path(os.environ.get(
+    "DOUBAO_INSTALL_SCRIPT_FILE", str(ROOT / "worker-assets" / "install-worker.ps1")
+)).resolve()
 LEASE_SECONDS = 90
 MAX_UPLOAD = 2 * 1024 * 1024 * 1024
 app = FastAPI(title="Doubao Task Server", docs_url=None, redoc_url=None)
@@ -181,6 +184,32 @@ def download_manager_asset(
     if not MANAGER_ASSET_FILE.is_file():
         raise HTTPException(404, "Doubao manager package is not available")
     return FileResponse(MANAGER_ASSET_FILE, media_type="application/zip", filename="DoubaoManager.zip")
+
+
+@app.get("/api/worker-assets/worker/manifest")
+def worker_asset_manifest(
+        enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
+    enrollment_auth(enrollment_token)
+    info = worker_release_info()
+    if not info:
+        raise HTTPException(404, "Worker package is not available")
+    return {"version": info["version"], "size": info["size"], "sha256": info["sha256"]}
+
+
+@app.get("/api/worker-assets/worker")
+def download_worker_asset(
+        enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
+    enrollment_auth(enrollment_token)
+    if not worker_release_info():
+        raise HTTPException(404, "Worker package is not available")
+    return FileResponse(WORKER_RELEASE_FILE, media_type="application/octet-stream", filename="DoubaoWorker.exe")
+
+
+@app.get("/api/worker-assets/install-script")
+def download_install_script():
+    if not INSTALL_SCRIPT_FILE.is_file():
+        raise HTTPException(404, "Install script is not available")
+    return FileResponse(INSTALL_SCRIPT_FILE, media_type="text/plain", filename="install-worker.ps1")
 
 
 def worker_release_info():
