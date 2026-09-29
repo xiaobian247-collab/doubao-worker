@@ -51,6 +51,17 @@ jobs:
           if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { throw 'Invalid Windows EXE' }
           "WORKER_VERSION=$version" >> $env:GITHUB_ENV
           Get-FileHash dist/DoubaoWorker.exe -Algorithm SHA256
+      - name: Verify installer syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'worker/install-worker.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            throw 'install-worker.ps1 has PowerShell syntax errors'
+          }
       - name: Smoke test Windows executable
         shell: pwsh
         run: |
