@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Doubao Cloud IP TLS certificate renewal
+
+[Timer]
+OnCalendar=*-*-* 02,14:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=doubao-cert-renew.service
+
+[Install]
+WantedBy=timers.target

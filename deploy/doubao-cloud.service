@@ -1,0 +1,23 @@
+[Unit]
+Description=Doubao Cloud Task API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/doubao-cloud/server
+EnvironmentFile=/etc/doubao-cloud.env
+ExecStart=/opt/doubao-cloud/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/doubao-cloud/data
+
+[Install]
+WantedBy=multi-user.target

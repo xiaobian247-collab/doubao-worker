@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: ../server
+    restart: unless-stopped
+    environment:
+      DOUBAO_DATA_DIR: /data
+      DOUBAO_CLIENT_TOKEN: ${DOUBAO_CLIENT_TOKEN}
+      DOUBAO_WORKER_TOKENS: ${DOUBAO_WORKER_TOKENS}
+    volumes:
+      - ./data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

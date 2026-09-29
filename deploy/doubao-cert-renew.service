@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew Doubao Cloud IP TLS certificate
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/doubao-cloud/certbot-venv/bin/certbot renew --quiet --deploy-hook /usr/local/sbin/doubao-cert-deploy

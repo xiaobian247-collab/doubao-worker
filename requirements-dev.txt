@@ -1,0 +1,4 @@
+-r server/requirements.txt
+-r worker/requirements.txt
+httpx>=0.27,<1
+pytest>=8,<10

@@ -1,0 +1,9 @@
+﻿{
+  "id": "video_plugin_doubao_web",
+  "name": "豆包网页直出插件 v0.7.17",
+  "version": "0.7.17",
+  "description": "直接驱动豆包网页版生成视频，支持「豆包管理器」与「浏览器直出」两个通道：多账号自动轮询与并发出片，额度耗尽/连续失败自动换号与分级冷却，无水印原片多级兜底下载，每次生成先切全新对话并做双层基线以杜绝抓旧片。管理器通道支持账号额度前置检测与手动停用/恢复（设置项 manager_disable_accounts、manager_recover_accounts）。三谋客出品（www.3mw.com.cn）微信：zmildo"
+}
+
+
+

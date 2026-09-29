@@ -1,0 +1,77 @@
+name: Build Windows Worker
+
+on:
+  push:
+    branches: [main]
+    tags: ["worker-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r worker/requirements.txt "pyinstaller>=6,<7"
+      - name: Build exe
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile `
+            --name DoubaoWorker `
+            --hidden-import websocket `
+            --collect-all qiniu `
+            --add-data "worker/plugin;plugin" `
+            --add-data "worker/VERSION;." `
+            --distpath dist `
+            worker/agent.py
+          if (-not (Test-Path dist/DoubaoWorker.exe)) { throw 'Worker EXE was not built' }
+          Copy-Item worker/config.example.json dist/config.example.json
+          Copy-Item worker/INSTALL.zh-CN.md dist/INSTALL.zh-CN.md
+          Copy-Item worker/VERSION dist/VERSION
+      - name: Verify version and executable
+        shell: pwsh
+        run: |
+          $version = (Get-Content worker/VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "worker-v$version") {
+            throw "Tag must be worker-v$version"
+          }
+          $bytes = [System.IO.File]::ReadAllBytes('dist/DoubaoWorker.exe')
+          if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { throw 'Invalid Windows EXE' }
+          "WORKER_VERSION=$version" >> $env:GITHUB_ENV
+          Get-FileHash dist/DoubaoWorker.exe -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DoubaoWorker-windows-x64
+          path: dist/
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/worker-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME dist/DoubaoWorker.exe dist/config.example.json dist/INSTALL.zh-CN.md `
+            --title $env:GITHUB_REF_NAME --generate-notes
+      - name: Publish update to API server
+        if: startsWith(github.ref, 'refs/tags/worker-v')
+        shell: pwsh
+        env:
+          RELEASE_TOKEN: ${{ secrets.WORKER_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:RELEASE_TOKEN) { throw 'Configure WORKER_RELEASE_TOKEN in GitHub repository secrets' }
+          curl.exe --fail-with-body --silent --show-error `
+            -H "X-Worker-Release-Token: $env:RELEASE_TOKEN" `
+            -F "version=$env:WORKER_VERSION" `
+            -F "file=@dist/DoubaoWorker.exe;type=application/octet-stream" `
+            https://www.zcbox.top/api/worker-releases

@@ -1,0 +1,28 @@
+{
+    default_sni 192.144.235.126
+}
+
+http://192.144.235.126 {
+    handle /.well-known/acme-challenge/* {
+        root * /var/www/doubao-acme
+        file_server
+    }
+
+    handle {
+        redir https://192.144.235.126{uri} permanent
+    }
+}
+
+https://192.144.235.126 {
+    tls /etc/caddy/certs/ip-fullchain.pem /etc/caddy/certs/ip-privkey.pem
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}
+
+www.zcbox.top {
+    tls {
+        issuer acme
+    }
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}

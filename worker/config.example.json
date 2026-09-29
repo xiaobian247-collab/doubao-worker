@@ -1,0 +1,8 @@
+{
+  "server_url": "https://www.zcbox.top",
+  "worker_id": "worker-01",
+  "worker_token": "replace-with-this-worker-token",
+  "manager_exe": "C:\\DoubaoManager\\豆包管理器.exe",
+  "manager_port": 9223,
+  "auto_update": true
+}

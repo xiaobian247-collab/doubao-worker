@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+install -d -o root -g caddy -m 750 /etc/caddy/certs
+install -o root -g caddy -m 640 /etc/letsencrypt/live/192.144.235.126/fullchain.pem /etc/caddy/certs/ip-fullchain.pem
+install -o root -g caddy -m 640 /etc/letsencrypt/live/192.144.235.126/privkey.pem /etc/caddy/certs/ip-privkey.pem
+systemctl reload caddy.service

@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.portable-build/
+build/
+dist/
+data/
+*.spec
+*.sqlite3*
+*.part
+config.json
+.env
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
