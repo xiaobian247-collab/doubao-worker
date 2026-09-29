@@ -136,7 +136,7 @@ def test_auth_and_transition_restrictions(setup):
 
 
 def test_worker_registration_creates_independent_token(setup):
-    _, client = setup
+    module, client = setup
     body = {"worker_id": "wkr-test-001", "machine_name": "cloud-a"}
     assert client.post("/api/workers/register", json=body).status_code == 401
     response = client.post("/api/workers/register", json=body,
@@ -151,6 +151,21 @@ def test_worker_registration_creates_independent_token(setup):
     assert heartbeat.status_code == 200, heartbeat.text
     assert client.post("/api/workers/register", json=body,
                        headers={"X-Worker-Enrollment-Token": "enroll-test-token"}).status_code == 409
+
+    package = module.MANAGER_ASSET_FILE
+    package.parent.mkdir(parents=True, exist_ok=True)
+    package.write_bytes(b"PK" + b"manager-package" * 10)
+    assert client.get("/api/worker-assets/manager/manifest").status_code == 401
+    headers = {"X-Worker-Enrollment-Token": "enroll-test-token"}
+    manifest = client.get("/api/worker-assets/manager/manifest", headers=headers)
+    assert manifest.status_code == 200
+    assert manifest.json() == {
+        "size": package.stat().st_size,
+        "sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
+    }
+    download = client.get("/api/worker-assets/manager", headers=headers)
+    assert download.status_code == 200
+    assert download.content == package.read_bytes()
 
 
 def test_importable_client_reference_to_download(setup, tmp_path):

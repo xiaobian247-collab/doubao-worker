@@ -23,19 +23,19 @@ GitHub 仓库的 Actions 每次推送 `main` 会自动生成 Windows x64 版
 ## 1.1 多云机自动注册（个人使用）
 
 服务器设置一个私有的 `DOUBAO_WORKER_ENROLL_TOKEN` 后，每台新云机只需运行一次
-`install-worker.ps1`。脚本会自动生成 `wkr-UUID`、向服务器注册、写入本机
-`config.json`，之后每台云机会使用自己的 token 参与排队，不需要手动修改服务器
-的 Worker token 列表：
+`install-worker.ps1`。脚本会从同一服务器下载豆包管理器、自动生成 `wkr-UUID`、
+向服务器注册、写入本机 `config.json`，之后每台云机会使用自己的 token 参与排队，
+不需要手动修改服务器的 Worker token 列表：
 
 ```powershell
 $env:DOUBAO_WORKER_ENROLL_TOKEN = '服务器上的同一个安装密钥'
-powershell -ExecutionPolicy Bypass -File .\install-worker.ps1 `
-  -ManagerUrl 'https://你的私有地址/DoubaoManager.zip'
+powershell -ExecutionPolicy Bypass -File .\install-worker.ps1
 ```
 
-压缩包应包含完整的 `豆包管理器.exe` 绿色版目录。安装脚本会下载 Worker、解压
-管理器、自动注册当前云机，并设置用户登录时启动。已安装的云机再次运行脚本时
-会复用本机已有身份。不要把安装密钥放进公开 GitHub 仓库或公开脚本 URL。
+服务器上的压缩包包含完整的 `豆包管理器.exe` 绿色版目录。安装脚本会校验
+SHA-256、下载 Worker、解压管理器、自动注册当前云机，并设置用户登录时启动。
+已安装的云机再次运行脚本时会复用本机已有身份。不要把安装密钥放进公开
+GitHub 仓库或公开脚本 URL。
 
 ## 2. 无 Python 构建 exe（推荐）
 

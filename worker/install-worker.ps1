@@ -13,6 +13,8 @@ if (-not $EnrollToken) {
 }
 
 $ServerUrl = $ServerUrl.TrimEnd('/')
+$defaultManagerUrl = "$ServerUrl/api/worker-assets/manager"
+if (-not $ManagerUrl) { $ManagerUrl = $defaultManagerUrl }
 $workerExe = Join-Path $InstallDir "DoubaoWorker.exe"
 $configPath = Join-Path $InstallDir "config.json"
 $managerDir = Join-Path $InstallDir "manager"
@@ -24,10 +26,28 @@ if (-not (Test-Path $workerExe)) {
     Invoke-WebRequest -Uri $url -OutFile $workerExe -UseBasicParsing
 }
 
-if ($ManagerUrl -and -not (Test-Path $managerDir)) {
+function Find-ManagerExe {
+    if (-not (Test-Path $managerDir)) { return $null }
+    $found = Get-ChildItem -Path $managerDir -Filter "豆包管理器.exe" -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $found) {
+        $found = Get-ChildItem -Path $managerDir -Filter "*.exe" -File -ErrorAction SilentlyContinue |
+            Sort-Object Length -Descending | Select-Object -First 1 -ExpandProperty FullName
+    }
+    return $found
+}
+
+$managerExe = Find-ManagerExe
+if (-not $managerExe) {
     $archive = Join-Path $InstallDir "manager.zip"
     Write-Host "Downloading Doubao manager..."
-    Invoke-WebRequest -Uri $ManagerUrl -OutFile $archive -UseBasicParsing
+    $downloadHeaders = @{}
+    if ($ManagerUrl -eq $defaultManagerUrl) {
+        $downloadHeaders["X-Worker-Enrollment-Token"] = $EnrollToken
+        $manifest = Invoke-RestMethod -Uri "$ManagerUrl/manifest" -Headers $downloadHeaders
+        if (-not $ManagerSha256) { $ManagerSha256 = $manifest.sha256 }
+    }
+    Invoke-WebRequest -Uri $ManagerUrl -Headers $downloadHeaders -OutFile $archive -UseBasicParsing
     if ($ManagerSha256) {
         $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $ManagerSha256.ToLowerInvariant()) {
@@ -36,16 +56,11 @@ if ($ManagerUrl -and -not (Test-Path $managerDir)) {
     }
     Expand-Archive -Path $archive -DestinationPath $managerDir -Force
     Remove-Item $archive -Force
+    $managerExe = Find-ManagerExe
 }
 
-$managerExe = Get-ChildItem -Path $managerDir -Filter "豆包管理器.exe" -File -Recurse -ErrorAction SilentlyContinue |
-    Select-Object -First 1 -ExpandProperty FullName
 if (-not $managerExe) {
-    $managerExe = Get-ChildItem -Path $managerDir -Filter "*.exe" -File -Recurse -ErrorAction SilentlyContinue |
-        Select-Object -First 1 -ExpandProperty FullName
-}
-if (-not $managerExe) {
-    throw "Doubao manager was not found. Pass -ManagerUrl with a zip containing 豆包管理器.exe."
+    throw "Doubao manager was not found in the downloaded package."
 }
 
 if (Test-Path $configPath) {

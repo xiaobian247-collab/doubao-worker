@@ -37,6 +37,9 @@ WORKER_RELEASE_FILE = Path(os.environ.get("DOUBAO_WORKER_RELEASE_FILE", str(WORK
 WORKER_RELEASE_FILE.parent.mkdir(parents=True, exist_ok=True)
 WORKER_RELEASE_MANIFEST = WORKER_RELEASE_DIR / "manifest.json"
 WORKER_RELEASE_ADMIN_TOKEN = os.environ.get("DOUBAO_WORKER_RELEASE_TOKEN", "")
+MANAGER_ASSET_FILE = Path(os.environ.get(
+    "DOUBAO_MANAGER_ASSET_FILE", str(ROOT / "worker-assets" / "DoubaoManager.zip")
+)).resolve()
 LEASE_SECONDS = 90
 MAX_UPLOAD = 2 * 1024 * 1024 * 1024
 app = FastAPI(title="Doubao Task Server", docs_url=None, redoc_url=None)
@@ -124,6 +127,21 @@ def worker_id_valid(value):
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,80}", value or ""))
 
 
+def enrollment_auth(enrollment_token):
+    if not WORKER_ENROLL_TOKEN or not hmac.compare_digest(enrollment_token, WORKER_ENROLL_TOKEN):
+        raise HTTPException(401, "Invalid worker enrollment token")
+
+
+def file_info(path):
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as src:
+        while chunk := src.read(1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
 class WorkerRegistration(BaseModel):
     worker_id: str = Field(min_length=2, max_length=81)
     machine_name: str = Field(default="", max_length=128)
@@ -132,8 +150,7 @@ class WorkerRegistration(BaseModel):
 @app.post("/api/workers/register")
 def register_worker(body: WorkerRegistration,
                     enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
-    if not WORKER_ENROLL_TOKEN or not hmac.compare_digest(enrollment_token, WORKER_ENROLL_TOKEN):
-        raise HTTPException(401, "Invalid worker enrollment token")
+    enrollment_auth(enrollment_token)
     if not worker_id_valid(body.worker_id):
         raise HTTPException(422, "Invalid worker id")
     token = secrets.token_urlsafe(32)
@@ -146,6 +163,24 @@ def register_worker(body: WorkerRegistration,
             "INSERT INTO worker_credentials (worker_id,token_hash,machine_name,created_at) VALUES (?,?,?,?)",
             (body.worker_id, hashlib.sha256(token.encode("utf-8")).hexdigest(), body.machine_name, now))
     return {"worker_id": body.worker_id, "worker_token": token}
+
+
+@app.get("/api/worker-assets/manager/manifest")
+def manager_asset_manifest(
+        enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
+    enrollment_auth(enrollment_token)
+    if not MANAGER_ASSET_FILE.is_file():
+        raise HTTPException(404, "Doubao manager package is not available")
+    return file_info(MANAGER_ASSET_FILE)
+
+
+@app.get("/api/worker-assets/manager")
+def download_manager_asset(
+        enrollment_token: str = Header(default="", alias="X-Worker-Enrollment-Token")):
+    enrollment_auth(enrollment_token)
+    if not MANAGER_ASSET_FILE.is_file():
+        raise HTTPException(404, "Doubao manager package is not available")
+    return FileResponse(MANAGER_ASSET_FILE, media_type="application/zip", filename="DoubaoManager.zip")
 
 
 def worker_release_info():
