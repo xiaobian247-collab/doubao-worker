@@ -166,6 +166,31 @@ def report(job_id, lease_token, status, message="", progress=None):
 
 def upload_video(job_id, lease_token, path):
     identity = {"worker_id": WORKER_ID, "lease_token": lease_token}
+    digest = hashlib.sha256()
+    with path.open("rb") as video:
+        while chunk := video.read(1024 * 1024):
+            digest.update(chunk)
+    sha256 = digest.hexdigest()
+
+    response = requests.post(SERVER + "/api/jobs/%s/cos-upload" % job_id,
+                             headers={"Authorization": "Bearer " + TOKEN},
+                             json=identity, timeout=30)
+    if response.status_code != 503:
+        response.raise_for_status()
+        upload = response.json()
+        with path.open("rb") as video:
+            uploaded = requests.put(upload["url"], data=video,
+                                    headers={"Content-Type": "video/mp4"}, timeout=(30, 1800))
+        uploaded.raise_for_status()
+        etag = uploaded.headers.get("ETag", "").strip().strip('"')
+        if not etag:
+            raise RuntimeError("COS upload did not return an ETag")
+        api("POST", "/api/jobs/%s/cos-complete" % job_id, payload={
+            **identity, "size": path.stat().st_size, "sha256": sha256,
+            "cos_etag": etag,
+        }, timeout=60)
+        return
+
     response = requests.post(SERVER + "/api/jobs/%s/qiniu-upload" % job_id,
                              headers={"Authorization": "Bearer " + TOKEN},
                              json=identity, timeout=30)
@@ -182,12 +207,8 @@ def upload_video(job_id, lease_token, path):
                                   mime_type="video/mp4")
     if not result or info.status_code != 200 or result.get("key") != upload["key"]:
         raise RuntimeError("Qiniu upload failed: " + str(info))
-    digest = hashlib.sha256()
-    with path.open("rb") as video:
-        while chunk := video.read(1024 * 1024):
-            digest.update(chunk)
     api("POST", "/api/jobs/%s/qiniu-complete" % job_id, payload={
-        **identity, "size": path.stat().st_size, "sha256": digest.hexdigest(),
+        **identity, "size": path.stat().st_size, "sha256": sha256,
         "qiniu_hash": result["hash"],
     }, timeout=60)
 

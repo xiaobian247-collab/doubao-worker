@@ -275,3 +275,60 @@ def test_qiniu_completion_requires_verified_object(setup, monkeypatch):
     location = client.get(f"/api/jobs/{job['id']}/video-location", headers=auth("client-test-token"))
     assert location.json() == {"url": "http://test.example/doubao/" + job["id"] + ".mp4"}
     assert not (module.ARTIFACTS / (job["id"] + ".mp4")).exists()
+
+
+def test_cos_completion_requires_verified_object(setup, monkeypatch):
+    module, client = setup
+    monkeypatch.setattr(module, "TENCENT_COS_SECRET_ID", "secret-id")
+    monkeypatch.setattr(module, "TENCENT_COS_SECRET_KEY", "secret-key")
+    monkeypatch.setattr(module, "TENCENT_COS_BUCKET", "test-bucket-123")
+    monkeypatch.setattr(module, "TENCENT_COS_REGION", "ap-beijing")
+
+    stored = {"Content-Length": "100", "ETag": '"cos-etag"'}
+
+    class CosConfig:
+        def __init__(self, **kwargs):
+            assert kwargs == {
+                "Region": "ap-beijing", "SecretId": "secret-id",
+                "SecretKey": "secret-key", "Scheme": "https",
+            }
+
+    class CosS3Client:
+        def __init__(self, config):
+            assert isinstance(config, CosConfig)
+
+        def get_presigned_url(self, **kwargs):
+            assert kwargs["Bucket"] == "test-bucket-123"
+            return "https://cos.example/" + kwargs["Key"] + "?method=" + kwargs["Method"]
+
+        def head_object(self, **kwargs):
+            assert kwargs == {"Bucket": "test-bucket-123", "Key": "videos/" + job["id"] + ".mp4"}
+            return stored
+
+    fake = types.ModuleType("qcloud_cos")
+    fake.CosConfig = CosConfig
+    fake.CosS3Client = CosS3Client
+    monkeypatch.setitem(sys.modules, "qcloud_cos", fake)
+
+    job = create(client)
+    owned = lease(client, "a", "worker-a-token")
+    identity = {"worker_id": "a", "lease_token": owned["lease_token"]}
+    for state in ("running", "uploading"):
+        assert client.post(f"/api/jobs/{job['id']}/report", json={**identity, "status": state},
+                           headers=auth("worker-a-token")).status_code == 200
+    upload = client.post(f"/api/jobs/{job['id']}/cos-upload", json=identity,
+                         headers=auth("worker-a-token"))
+    assert upload.status_code == 200
+    assert upload.json()["key"] == "videos/" + job["id"] + ".mp4"
+    complete = {**identity, "size": 100, "sha256": "a" * 64, "cos_etag": "wrong"}
+    assert client.post(f"/api/jobs/{job['id']}/cos-complete", json=complete,
+                       headers=auth("worker-a-token")).status_code == 409
+    complete["cos_etag"] = "cos-etag"
+    assert client.post(f"/api/jobs/{job['id']}/cos-complete", json=complete,
+                       headers=auth("worker-a-token")).status_code == 200
+    location = client.get(f"/api/jobs/{job['id']}/video-location", headers=auth("client-test-token"))
+    assert location.json() == {"url": "https://cos.example/videos/" + job["id"] + ".mp4?method=GET"}
+    download = client.get(f"/api/jobs/{job['id']}/video", headers=auth("client-test-token"),
+                          follow_redirects=False)
+    assert download.status_code == 307
+    assert download.headers["location"].endswith(".mp4?method=GET")

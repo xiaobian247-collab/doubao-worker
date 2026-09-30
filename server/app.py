@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 ROOT = Path(os.environ.get("DOUBAO_DATA_DIR", "./data")).resolve()
@@ -31,6 +31,10 @@ QINIU_SECRET_KEY = os.environ.get("QINIU_SECRET_KEY", "")
 QINIU_BUCKET = os.environ.get("QINIU_BUCKET", "")
 QINIU_TEST_DOMAIN = os.environ.get("QINIU_TEST_DOMAIN", "").rstrip("/")
 QINIU_PRIVATE_BUCKET = os.environ.get("QINIU_PRIVATE_BUCKET", "false").lower() == "true"
+TENCENT_COS_SECRET_ID = os.environ.get("TENCENT_COS_SECRET_ID", "")
+TENCENT_COS_SECRET_KEY = os.environ.get("TENCENT_COS_SECRET_KEY", "")
+TENCENT_COS_BUCKET = os.environ.get("TENCENT_COS_BUCKET", "")
+TENCENT_COS_REGION = os.environ.get("TENCENT_COS_REGION", "")
 WORKER_RELEASE_DIR = Path(os.environ.get("DOUBAO_WORKER_RELEASE_DIR", str(ROOT / "worker-release"))).resolve()
 WORKER_RELEASE_DIR.mkdir(parents=True, exist_ok=True)
 WORKER_RELEASE_FILE = Path(os.environ.get("DOUBAO_WORKER_RELEASE_FILE", str(WORKER_RELEASE_DIR / "DoubaoWorker.exe"))).resolve()
@@ -78,7 +82,7 @@ with db() as conn:
           status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
           message TEXT NOT NULL DEFAULT '', worker_id TEXT, lease_token TEXT,
           lease_until REAL, artifact_name TEXT, size INTEGER, sha256 TEXT,
-          qiniu_key TEXT, qiniu_hash TEXT,
+          qiniu_key TEXT, qiniu_hash TEXT, cos_key TEXT, cos_etag TEXT,
           created_at REAL NOT NULL, updated_at REAL NOT NULL
         );
         CREATE TABLE IF NOT EXISTS workers (
@@ -97,6 +101,10 @@ with db() as conn:
         conn.execute("ALTER TABLE jobs ADD COLUMN qiniu_key TEXT")
     if "qiniu_hash" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN qiniu_hash TEXT")
+    if "cos_key" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN cos_key TEXT")
+    if "cos_etag" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN cos_etag TEXT")
 
 
 def token_value(authorization):
@@ -268,6 +276,43 @@ class QiniuArtifact(BaseModel):
     size: int = Field(ge=64, le=MAX_UPLOAD)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     qiniu_hash: str = Field(min_length=1, max_length=128)
+
+
+class CosArtifact(BaseModel):
+    worker_id: str
+    lease_token: str
+    size: int = Field(ge=64, le=MAX_UPLOAD)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cos_etag: str = Field(min_length=1, max_length=128)
+
+
+def cos_enabled():
+    return all((TENCENT_COS_SECRET_ID, TENCENT_COS_SECRET_KEY,
+                TENCENT_COS_BUCKET, TENCENT_COS_REGION))
+
+
+def cos_client():
+    from qcloud_cos import CosConfig, CosS3Client
+    config = CosConfig(
+        Region=TENCENT_COS_REGION,
+        SecretId=TENCENT_COS_SECRET_ID,
+        SecretKey=TENCENT_COS_SECRET_KEY,
+        Scheme="https",
+    )
+    return CosS3Client(config)
+
+
+def cos_url(key, method="GET"):
+    return cos_client().get_presigned_url(
+        Method=method,
+        Bucket=TENCENT_COS_BUCKET,
+        Key=key,
+        Expired=3600,
+    )
+
+
+def normalize_etag(value):
+    return str(value or "").strip().strip('"')
 
 
 def qiniu_enabled():
@@ -587,12 +632,53 @@ def qiniu_complete(job_id: str, body: QiniuArtifact, authorization: str = Header
     return {"size": body.size, "sha256": body.sha256}
 
 
+@app.post("/api/jobs/{job_id}/cos-upload")
+def cos_upload_url(job_id: str, body: WorkerReport, authorization: str = Header(default="")):
+    worker_auth(body.worker_id, authorization)
+    if not cos_enabled():
+        raise HTTPException(503, "COS storage is not configured")
+    with db() as conn:
+        row = active_job(conn, job_id, body)
+        if row["status"] != "uploading":
+            raise HTTPException(409, "Job is not uploading")
+    key = "videos/" + job_id + ".mp4"
+    return {"url": cos_url(key, method="PUT"), "key": key}
+
+
+@app.post("/api/jobs/{job_id}/cos-complete")
+def cos_complete(job_id: str, body: CosArtifact, authorization: str = Header(default="")):
+    worker_auth(body.worker_id, authorization)
+    if not cos_enabled():
+        raise HTTPException(503, "COS storage is not configured")
+    report = WorkerReport(worker_id=body.worker_id, lease_token=body.lease_token)
+    with db() as conn:
+        row = active_job(conn, job_id, report)
+        if row["status"] != "uploading":
+            raise HTTPException(409, "Job is not uploading")
+    key = "videos/" + job_id + ".mp4"
+    try:
+        result = cos_client().head_object(Bucket=TENCENT_COS_BUCKET, Key=key)
+    except Exception as exc:
+        raise HTTPException(502, "COS upload could not be verified") from exc
+    actual_size = int(result.get("Content-Length", result.get("ContentLength", -1)))
+    actual_etag = normalize_etag(result.get("ETag"))
+    if actual_size != body.size or not actual_etag or actual_etag != normalize_etag(body.cos_etag):
+        raise HTTPException(409, "COS object does not match upload")
+    with db() as conn:
+        active_job(conn, job_id, report)
+        conn.execute("UPDATE jobs SET status='succeeded',progress=100,message='',cos_key=?,cos_etag=?,size=?,sha256=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=?",
+                     (key, actual_etag, body.size, body.sha256, time.time(), job_id))
+    return {"size": body.size, "sha256": body.sha256}
+
+
 @app.get("/api/jobs/{job_id}/video-location", dependencies=[Depends(client_auth)])
 def video_location(job_id: str):
     with db() as conn:
-        row = conn.execute("SELECT status,qiniu_key FROM jobs WHERE id=?", (job_id,)).fetchone()
+        row = conn.execute("SELECT status,cos_key,qiniu_key FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not row or row["status"] != "succeeded":
         raise HTTPException(404, "Video unavailable")
+    if row["cos_key"]:
+        return {"url": cos_url(row["cos_key"])}
     return {"url": qiniu_url(row["qiniu_key"]) if row["qiniu_key"] else None}
 
 
@@ -602,8 +688,9 @@ def download(job_id: str):
         row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row or row["status"] != "succeeded":
             raise HTTPException(404, "Video unavailable")
+        if row["cos_key"]:
+            return RedirectResponse(cos_url(row["cos_key"]), status_code=307)
         if row["qiniu_key"]:
-            from fastapi.responses import RedirectResponse
             return RedirectResponse(qiniu_url(row["qiniu_key"]), status_code=307)
         path = ARTIFACTS / row["artifact_name"]
     return FileResponse(path, media_type="video/mp4", filename=job_id + ".mp4")

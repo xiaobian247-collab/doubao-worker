@@ -72,7 +72,8 @@ def test_worker_uses_scoped_qiniu_token(tmp_path, monkeypatch):
     calls = []
 
     class Response:
-        status_code = 200
+        def __init__(self, status_code=200):
+            self.status_code = status_code
 
         def raise_for_status(self):
             pass
@@ -81,6 +82,9 @@ def test_worker_uses_scoped_qiniu_token(tmp_path, monkeypatch):
             return {"token": "temporary-token", "key": key}
 
     def post(url, **kwargs):
+        if url.endswith("/cos-upload"):
+            calls.append(("cos-unavailable", url))
+            return Response(503)
         calls.append(("token", url, kwargs["json"]))
         return Response()
 
@@ -99,9 +103,49 @@ def test_worker_uses_scoped_qiniu_token(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "api", api)
     worker.upload_video("job-1", "lease-1", video)
 
-    assert [call[0] for call in calls] == ["token", "upload", "complete"]
+    assert [call[0] for call in calls] == ["cos-unavailable", "token", "upload", "complete"]
     assert calls[-1][2]["sha256"] == hashlib.sha256(video.read_bytes()).hexdigest()
     assert calls[-1][2]["qiniu_hash"] == "etag"
+
+
+def test_worker_uses_cos_presigned_url(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    worker = load("worker_cos_" + uuid.uuid4().hex, root / "worker" / "agent.py")
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"0" * 100)
+    calls = []
+
+    class Response:
+        status_code = 200
+        headers = {"ETag": '"cos-etag"'}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"url": "https://cos.example/upload", "key": "videos/job-1.mp4"}
+
+    def post(url, **kwargs):
+        calls.append(("sign", url, kwargs["json"]))
+        return Response()
+
+    def put(url, **kwargs):
+        assert url == "https://cos.example/upload"
+        assert kwargs["data"].read() == video.read_bytes()
+        calls.append(("upload", url))
+        return Response()
+
+    def api(method, path, **kwargs):
+        calls.append(("complete", path, kwargs["payload"]))
+
+    monkeypatch.setattr(worker.requests, "post", post)
+    monkeypatch.setattr(worker.requests, "put", put)
+    monkeypatch.setattr(worker, "api", api)
+    worker.upload_video("job-1", "lease-1", video)
+
+    assert [call[0] for call in calls] == ["sign", "upload", "complete"]
+    assert calls[-1][2]["cos_etag"] == "cos-etag"
+    assert calls[-1][2]["sha256"] == hashlib.sha256(video.read_bytes()).hexdigest()
 
 
 def test_worker_rejects_corrupt_update(tmp_path, monkeypatch):
