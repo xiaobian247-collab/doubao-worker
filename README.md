@@ -35,8 +35,7 @@ export DOUBAO_WORKER_TOKENS='{"worker-01":"another-long-random-secret"}'
 ```
 
 Use one Uvicorn process with SQLite. Keep the data directory private and back it
-up. When Qiniu is configured, Workers upload videos there directly; otherwise
-they upload to the server.
+up. Workers upload videos directly to COS and use server-local storage as a fallback.
 
 ## Windows Worker
 

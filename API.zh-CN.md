@@ -116,16 +116,15 @@ Worker 使用单独的 `worker_token`，不会使用客户端令牌：
 | `POST` | `/api/workers/heartbeat` | 汇报 Worker 在线和租约续期 |
 | `GET` | `/api/jobs/<job_id>/references/<index>` | 下载参考图片 |
 | `POST` | `/api/jobs/<job_id>/report` | 汇报生成状态和进度 |
-| `POST` | `/api/jobs/<job_id>/artifact` | 上传生成的 MP4 |
-| `POST` | `/api/jobs/<job_id>/qiniu-upload` | 获取该任务专用的限时七牛上传凭证 |
-| `POST` | `/api/jobs/<job_id>/qiniu-complete` | 核对七牛对象后标记成功 |
+| `POST` | `/api/jobs/<job_id>/cos-upload` | 获取该任务专用的限时 COS 上传地址 |
+| `POST` | `/api/jobs/<job_id>/cos-complete` | 核对 COS 对象后标记成功 |
+| `POST` | `/api/jobs/<job_id>/artifact` | COS 不可用时上传 MP4 到服务器保底 |
 
 这些接口由 `worker/agent.py` 自动调用，你不需要手动拼请求。
-配置七牛时，Worker 优先直传七牛，服务器只保存对象 key、大小和校验值；
-没有配置七牛时仍上传至服务器。客户端通过受保护的
-`GET /api/jobs/<job_id>/video-location` 获取临时下载地址，或通过原有
-`/video` 接口下载。七牛默认测试域名到期后可能整体不可用，
-服务器保留 key 但不保证到期后可通过旧域名取回视频。
+Worker 优先通过临时签名地址直传私有 COS，长期 COS 密钥只保存在服务器。
+COS 未配置或暂时不可用时，Worker 将视频上传到原服务器本地目录保底。
+客户端通过受保护的 `GET /api/jobs/<job_id>/video-location` 获取 COS 临时下载
+地址，或统一通过 `/video` 接口下载。
 
 ## 五、最简单的使用方式
 

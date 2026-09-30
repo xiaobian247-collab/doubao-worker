@@ -63,12 +63,11 @@ def test_worker_http_cycle(tmp_path, monkeypatch):
         thread.join(timeout=10)
 
 
-def test_worker_uses_scoped_qiniu_token(tmp_path, monkeypatch):
+def test_worker_falls_back_to_server_when_cos_unavailable(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
-    worker = load("worker_qiniu_" + uuid.uuid4().hex, root / "worker" / "agent.py")
+    worker = load("worker_local_fallback_" + uuid.uuid4().hex, root / "worker" / "agent.py")
     video = tmp_path / "video.mp4"
     video.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"0" * 100)
-    key = "doubao/job-1.mp4"
     calls = []
 
     class Response:
@@ -78,34 +77,20 @@ def test_worker_uses_scoped_qiniu_token(tmp_path, monkeypatch):
         def raise_for_status(self):
             pass
 
-        def json(self):
-            return {"token": "temporary-token", "key": key}
-
     def post(url, **kwargs):
-        if url.endswith("/cos-upload"):
-            calls.append(("cos-unavailable", url))
-            return Response(503)
-        calls.append(("token", url, kwargs["json"]))
-        return Response()
-
-    def put_file(token, upload_key, path, **kwargs):
-        assert (token, upload_key, path) == ("temporary-token", key, str(video))
-        calls.append(("upload", upload_key))
-        return {"key": key, "hash": "etag"}, types.SimpleNamespace(status_code=200)
+        calls.append(("cos-unavailable", url))
+        return Response(503)
 
     def api(method, path, **kwargs):
-        calls.append(("complete", path, kwargs["payload"]))
+        assert kwargs["files"]["file"][1].read() == video.read_bytes()
+        calls.append(("local-upload", path, kwargs["params"]))
 
-    fake_qiniu = types.ModuleType("qiniu")
-    fake_qiniu.put_file = put_file
-    monkeypatch.setitem(sys.modules, "qiniu", fake_qiniu)
     monkeypatch.setattr(worker.requests, "post", post)
     monkeypatch.setattr(worker, "api", api)
     worker.upload_video("job-1", "lease-1", video)
 
-    assert [call[0] for call in calls] == ["cos-unavailable", "token", "upload", "complete"]
-    assert calls[-1][2]["sha256"] == hashlib.sha256(video.read_bytes()).hexdigest()
-    assert calls[-1][2]["qiniu_hash"] == "etag"
+    assert [call[0] for call in calls] == ["cos-unavailable", "local-upload"]
+    assert calls[-1][2] == {"worker_id": worker.WORKER_ID, "lease_token": "lease-1"}
 
 
 def test_worker_uses_cos_presigned_url(tmp_path, monkeypatch):

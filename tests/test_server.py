@@ -225,58 +225,6 @@ def test_importable_client_reference_to_download(setup, tmp_path):
     assert client.status(job["id"])["sha256"] == hashlib.sha256(video).hexdigest()
 
 
-def test_qiniu_completion_requires_verified_object(setup, monkeypatch):
-    module, client = setup
-    monkeypatch.setattr(module, "QINIU_ACCESS_KEY", "access")
-    monkeypatch.setattr(module, "QINIU_SECRET_KEY", "secret")
-    monkeypatch.setattr(module, "QINIU_BUCKET", "bucket")
-    monkeypatch.setattr(module, "QINIU_TEST_DOMAIN", "http://test.example")
-
-    stored = {"fsize": 100, "hash": "etag"}
-    fake = types.ModuleType("qiniu")
-
-    class Auth:
-        def __init__(self, access, secret):
-            assert (access, secret) == ("access", "secret")
-
-        def upload_token(self, bucket, key, expires):
-            assert (bucket, expires) == ("bucket", 3600)
-            return "temporary-token-for-" + key
-
-    class BucketManager:
-        def __init__(self, auth):
-            assert isinstance(auth, Auth)
-
-        def stat(self, bucket, key):
-            assert (bucket, key) == ("bucket", "doubao/" + job["id"] + ".mp4")
-            return stored, types.SimpleNamespace(status_code=200)
-
-    fake.Auth = Auth
-    fake.BucketManager = BucketManager
-    monkeypatch.setitem(sys.modules, "qiniu", fake)
-
-    job = create(client)
-    owned = lease(client, "a", "worker-a-token")
-    identity = {"worker_id": "a", "lease_token": owned["lease_token"]}
-    for state in ("running", "uploading"):
-        assert client.post(f"/api/jobs/{job['id']}/report", json={**identity, "status": state},
-                           headers=auth("worker-a-token")).status_code == 200
-    upload = client.post(f"/api/jobs/{job['id']}/qiniu-upload", json=identity,
-                         headers=auth("worker-a-token"))
-    assert upload.status_code == 200
-    assert upload.json()["key"] == "doubao/" + job["id"] + ".mp4"
-    complete = {**identity, "size": 100, "sha256": "a" * 64, "qiniu_hash": "wrong"}
-    assert client.post(f"/api/jobs/{job['id']}/qiniu-complete", json=complete,
-                       headers=auth("worker-a-token")).status_code == 409
-    assert client.get(f"/api/jobs/{job['id']}", headers=auth("client-test-token")).json()["status"] == "uploading"
-    complete["qiniu_hash"] = "etag"
-    assert client.post(f"/api/jobs/{job['id']}/qiniu-complete", json=complete,
-                       headers=auth("worker-a-token")).status_code == 200
-    location = client.get(f"/api/jobs/{job['id']}/video-location", headers=auth("client-test-token"))
-    assert location.json() == {"url": "http://test.example/doubao/" + job["id"] + ".mp4"}
-    assert not (module.ARTIFACTS / (job["id"] + ".mp4")).exists()
-
-
 def test_cos_completion_requires_verified_object(setup, monkeypatch):
     module, client = setup
     monkeypatch.setattr(module, "TENCENT_COS_SECRET_ID", "secret-id")

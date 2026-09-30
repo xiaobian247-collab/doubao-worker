@@ -190,27 +190,10 @@ def upload_video(job_id, lease_token, path):
             "cos_etag": etag,
         }, timeout=60)
         return
-
-    response = requests.post(SERVER + "/api/jobs/%s/qiniu-upload" % job_id,
-                             headers={"Authorization": "Bearer " + TOKEN},
-                             json=identity, timeout=30)
-    if response.status_code == 503:
-        with path.open("rb") as video:
-            api("POST", "/api/jobs/%s/artifact" % job_id,
-                params=identity, files={"file": (job_id + ".mp4", video, "video/mp4")},
-                timeout=1800)
-        return
-    response.raise_for_status()
-    upload = response.json()
-    import qiniu
-    result, info = qiniu.put_file(upload["token"], upload["key"], str(path),
-                                  mime_type="video/mp4")
-    if not result or info.status_code != 200 or result.get("key") != upload["key"]:
-        raise RuntimeError("Qiniu upload failed: " + str(info))
-    api("POST", "/api/jobs/%s/qiniu-complete" % job_id, payload={
-        **identity, "size": path.stat().st_size, "sha256": sha256,
-        "qiniu_hash": result["hash"],
-    }, timeout=60)
+    with path.open("rb") as video:
+        api("POST", "/api/jobs/%s/artifact" % job_id,
+            params=identity, files={"file": (job_id + ".mp4", video, "video/mp4")},
+            timeout=1800)
 
 
 def version_key(value):

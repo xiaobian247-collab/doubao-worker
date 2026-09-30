@@ -50,7 +50,6 @@ Write-Host 'Building DoubaoWorker.exe...'
 & $pythonExe -m PyInstaller --noconfirm --clean --onefile `
     --name DoubaoWorker `
     --hidden-import websocket `
-    --collect-all qiniu `
     --add-data ((Join-Path $PSScriptRoot 'plugin') + ';plugin') `
     --add-data ((Join-Path $PSScriptRoot 'VERSION') + ';.') `
     --distpath $dist `

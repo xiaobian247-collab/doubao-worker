@@ -30,7 +30,6 @@ jobs:
           python -m PyInstaller --noconfirm --clean --onefile `
             --name DoubaoWorker `
             --hidden-import websocket `
-            --collect-all qiniu `
             --add-data "worker/plugin;plugin" `
             --add-data "worker/VERSION;." `
             --distpath dist `
